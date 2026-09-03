@@ -1,0 +1,125 @@
+import logging
+import re
+from datetime import date
+
+from openg2p_registry_core.services import G2PRegisterDomainService
+
+from .domain_validation_utils import parse_date, validation_error
+
+_logger = logging.getLogger("g2p-register-domain-service")
+
+
+# FR- followed by exactly 10 digits, as enforced by _check_farmer_id_format in
+# g2p_livestock_registry/models/livestock_registry.py.
+_FARMER_ID_PATTERN = re.compile(r"^FR-\d{10}$")
+# FAN- followed by exactly 16 digits, as enforced by _check_fayda_fan_id_format in
+# g2p_livestock_registry/models/livestock_registry.py.
+_FAYDA_FAN_ID_PATTERN = re.compile(r"^FAN-\d{16}$")
+# Ethiopian mobile numbers only, matching _check_mobile_numbers in gen1's
+# g2p_crop_registry/model/crop_registry.py: +251 or a leading 0, followed by
+# 7 or 9 (the only leading digits Ethiopian mobile numbers use) and 8 more
+# digits, e.g. +251911223344 or 0911223344.
+_MOBILE_NUMBER_PATTERN = re.compile(r"^(\+251[79]\d{8}|0[79]\d{8})$")
+
+
+class G2PRegisterDomainServiceLivestock(G2PRegisterDomainService):
+
+    async def validate_domain_attributes(self, records: list[dict]):
+        for record in records:
+            # NOT required here, unlike the Farmer register's own copy of
+            # these two fields: the "Farmer Details" section's farmer_id/
+            # fayda_fan_id are a display-only mirror of the linked Farmer and
+            # are never actually populated through this per-section save (see
+            # g2p_intake_form_livestocks — 0/23 rows have ever had a
+            # non-blank farmer_id here); they get copied over from the Farmer
+            # register at finalize/approval time instead. Requiring them here
+            # blocked every Livestock intake at this section regardless of
+            # what the user typed.
+            self._validate_farmer_id(record)
+            self._validate_fayda_fan_id(record)
+            self._validate_mobile_number(record, "surveyor_mobile_number")
+            self._validate_mobile_number(record, "supervisor_mobile_number")
+            self._validate_not_in_future(record, "registration_date")
+
+    def _validate_farmer_id(self, record: dict) -> None:
+        value = record.get("farmer_id")
+        if value is None or str(value).strip() == "":
+            return
+        if not _FARMER_ID_PATTERN.match(str(value).strip().upper()):
+            validation_error(
+                "farmer_id must be FR- followed by exactly 10 digits, e.g. FR-1234567890"
+            )
+
+    def _validate_fayda_fan_id(self, record: dict) -> None:
+        value = record.get("fayda_fan_id")
+        if value is None or str(value).strip() == "":
+            return
+        if not _FAYDA_FAN_ID_PATTERN.match(str(value).strip().upper()):
+            validation_error(
+                "fayda_fan_id must be FAN- followed by exactly 16 digits, e.g. FAN-1234567890123456"
+            )
+
+    def _validate_mobile_number(self, record: dict, field: str) -> None:
+        value = record.get(field)
+        if value is None or str(value).strip() == "":
+            return
+        if not _MOBILE_NUMBER_PATTERN.match(str(value).strip()):
+            validation_error(
+                f"{field} must be a valid Ethiopian mobile number, "
+                "e.g. +251911223344 or 0911223344"
+            )
+
+    def _validate_not_in_future(self, record: dict, field: str) -> None:
+        value = parse_date(record.get(field))
+        if value is not None and value > date.today():
+            validation_error(f"{field} must not be in the future")
+
+    def construct_search_text(self, payload: dict, extra: list[str] = None) -> str:
+        _logger.info("Constructing search text for livestock record")
+
+        keys = [
+            "functional_record_id",
+            "oan_id",
+            "farmer_name",
+            "farmer_id",
+            "fayda_fan_id",
+            "secondary_identifier",
+            "status",
+            "state",
+            "source_system",
+            "surveyor_name",
+            "supervisor_name",
+            "region",
+            "zone",
+            "woreda",
+            "kebele",
+            "country_code",
+        ]
+        search_text = []
+        if extra:
+            search_text.extend(str(item).strip() for item in extra if str(item).strip())
+        search_text.extend(
+            str(payload.get(key) or "").strip()
+            for key in keys
+            if str(payload.get(key) or "").strip()
+        )
+
+        return " ".join(search_text).strip()
+
+    def construct_record_name(self, payload: dict, extra: list[str] = None) -> str:
+        _logger.info("Constructing record name for livestock record")
+
+        # Farmer name only. Appending the OAN id here put the name and a long
+        # identifier on one line in the register list, where the id is already
+        # shown as its own column.
+        keys = ["farmer_name"]
+        record_name = []
+        if extra:
+            record_name.extend(str(item).strip() for item in extra if str(item).strip())
+        record_name.extend(
+            str(payload.get(key) or "").strip()
+            for key in keys
+            if str(payload.get(key) or "").strip()
+        )
+
+        return " ".join(record_name).strip()
