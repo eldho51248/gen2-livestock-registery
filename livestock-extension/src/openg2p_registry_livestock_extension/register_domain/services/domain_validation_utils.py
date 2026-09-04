@@ -141,6 +141,65 @@ async def ear_tag_exists(ear_tag_id: str) -> bool:
         return bool(in_intake)
 
 
+async def ear_tag_used_by_other_animal(
+    ear_tag_id: str,
+    species,
+    breed,
+    exclude_internal_record_ids: set[str] | None = None,
+) -> bool:
+    """True if `ear_tag_id`, with this same species and breed, already
+    belongs to a DIFFERENT animal — either already approved into the
+    register, or drafted under some other in-progress intake submission.
+    Mirrors the Old System's duplicate check ("same tag + same species +
+    same breed already used"), which Gen2's Livestock Details section was
+    missing entirely — see `_validate_no_duplicate_ear_tags` in
+    G2PRegisterDomainServiceAnimal, the only caller.
+
+    Unlike `ear_tag_exists` above, this one IS scoped to the record being
+    edited: `exclude_internal_record_ids` should be every internal_record_id
+    already present in the current save's own row list, so re-saving an
+    animal you already registered — its ear tag is already sitting in
+    g2p_intake_form_animals from the previous save — doesn't look like a
+    duplicate of itself. g2p_register_animals needs no such exclusion:
+    intake forms only ever create new submissions, so a row being drafted
+    here can't already be sitting in the approved register under the same
+    internal_record_id.
+    """
+    if is_blank(ear_tag_id):
+        return False
+
+    from openg2p_fastapi_common.context import dbengine
+    from sqlalchemy import and_, exists, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    G2PRegisterAnimal, G2PIntakeFormAnimal = _animal_models()
+    exclude_internal_record_ids = exclude_internal_record_ids or set()
+
+    def _same_animal_key(model):
+        return and_(
+            model.ear_tag_id == ear_tag_id,
+            model.species == species,
+            model.breed == breed,
+        )
+
+    session_maker = async_sessionmaker(dbengine.get(), expire_on_commit=False)
+    async with session_maker() as session:
+        in_register = (
+            await session.execute(select(exists().where(_same_animal_key(G2PRegisterAnimal))))
+        ).scalar()
+        if in_register:
+            return True
+
+        matching_intake_ids = (
+            await session.execute(
+                select(G2PIntakeFormAnimal.internal_record_id).where(_same_animal_key(G2PIntakeFormAnimal))
+            )
+        ).scalars().all()
+        return any(
+            str(record_id) not in exclude_internal_record_ids for record_id in matching_intake_ids
+        )
+
+
 async def get_animal_species(ear_tag_id: str) -> str | None:
     """The species already recorded against ear_tag_id under Livestock
     Details, or None if the ear tag isn't known anywhere. Checks the
