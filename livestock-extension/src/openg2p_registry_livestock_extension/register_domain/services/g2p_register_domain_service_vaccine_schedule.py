@@ -2,6 +2,8 @@ import logging
 
 from openg2p_registry_core.services import G2PRegisterDomainService
 
+from .audit_snapshot import AuditSnapshotMixin
+
 from .domain_validation_utils import as_int, is_blank, validation_error
 
 _logger = logging.getLogger("g2p-register-domain-service")
@@ -15,7 +17,7 @@ _REQUIRED_FIELDS = {
 }
 
 
-class G2PRegisterDomainServiceVaccineSchedule(G2PRegisterDomainService):
+class G2PRegisterDomainServiceVaccineSchedule(AuditSnapshotMixin, G2PRegisterDomainService):
 
     async def validate_domain_attributes(self, records: list[dict]):
         for record in records:

@@ -3,6 +3,8 @@ from datetime import date
 
 from openg2p_registry_core.services import G2PRegisterDomainService
 
+from .audit_snapshot import AuditSnapshotMixin
+
 from .domain_validation_utils import (
     ear_tag_exists, is_blank, parse_date, validate_species_matches, validation_error,
 )
@@ -19,7 +21,7 @@ _REQUIRED_FIELDS = {
 }
 
 
-class G2PRegisterDomainServiceVaccination(G2PRegisterDomainService):
+class G2PRegisterDomainServiceVaccination(AuditSnapshotMixin, G2PRegisterDomainService):
 
     async def validate_domain_attributes(self, records: list[dict]):
         for record in records:

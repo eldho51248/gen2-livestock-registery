@@ -4,6 +4,8 @@ from datetime import date
 
 from openg2p_registry_core.services import G2PRegisterDomainService
 
+from .audit_snapshot import AuditSnapshotMixin
+
 from .domain_validation_utils import (
     as_float,
     ear_tag_used_by_other_animal,
@@ -25,6 +27,7 @@ _REQUIRED_FIELDS = {
     "ear_tag_id": "livestock ear tag",
     "species": "species",
     "breed": "breed",
+    "gender": "gender",  # G2R-135 mandatory constraint
     "date_of_birth": "date of birth",
     "vaccination_status": "vaccination status",
     "health_status": "health status",
@@ -32,7 +35,7 @@ _REQUIRED_FIELDS = {
 }
 
 
-class G2PRegisterDomainServiceAnimal(G2PRegisterDomainService):
+class G2PRegisterDomainServiceAnimal(AuditSnapshotMixin, G2PRegisterDomainService):
 
     async def validate_domain_attributes(self, records: list[dict]):
         for record in records:

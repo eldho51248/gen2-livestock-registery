@@ -3,6 +3,8 @@ from datetime import date
 
 from openg2p_registry_core.services import G2PRegisterDomainService
 
+from .audit_snapshot import AuditSnapshotMixin
+
 from .domain_validation_utils import (
     ear_tag_exists, is_blank, parse_date, validate_species_matches, validation_error,
 )
@@ -11,19 +13,24 @@ _logger = logging.getLogger("g2p-register-domain-service")
 
 # field -> human label used in the "Please provide the ... " message, mirroring
 # the fields marked "widget-required" on the Health Event Details form.
+#
+# disease_type is NOT here even though the form shows it as required-looking:
+# it is only mandatory for a DISEASE event (see _validate_disease_type below,
+# mirroring vital_event's _validate_offspring_count) — an INJURY/TREATMENT/
+# RECOVERY event hides the field entirely and must not be blocked on it.
 _REQUIRED_FIELDS = {
     "ear_tag_id": "livestock ear tag",
     "species": "species",
     "event_type": "event type",
-    "disease_type": "disease",
 }
 
 
-class G2PRegisterDomainServiceHealthEvent(G2PRegisterDomainService):
+class G2PRegisterDomainServiceHealthEvent(AuditSnapshotMixin, G2PRegisterDomainService):
 
     async def validate_domain_attributes(self, records: list[dict]):
         for record in records:
             self._validate_required_fields(record)
+            self._validate_disease_type(record)
             await self._validate_ear_tag_exists(record)
             await validate_species_matches(record)
             self._validate_not_in_future(record, "date_onset")
@@ -33,6 +40,14 @@ class G2PRegisterDomainServiceHealthEvent(G2PRegisterDomainService):
         for field, label in _REQUIRED_FIELDS.items():
             if is_blank(record.get(field)):
                 validation_error(f"Please provide the {label} before saving the record.")
+
+    def _validate_disease_type(self, record: dict) -> None:
+        # Only a DISEASE event carries a disease — the form hides disease_type
+        # for INJURY/TREATMENT/RECOVERY, so it must not be required there.
+        if str(record.get("event_type") or "").upper() != "DISEASE":
+            return
+        if is_blank(record.get("disease_type")):
+            validation_error("Please provide the disease before saving the record.")
 
     async def _validate_ear_tag_exists(self, record: dict) -> None:
         value = record.get("ear_tag_id")

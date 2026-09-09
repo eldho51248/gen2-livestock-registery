@@ -288,6 +288,40 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:${MASTER_DATA_PORT}/ping')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  # Loads the real Ethiopia region/zone/woreda/kebele hierarchy into master-data's
+  # geo tables (g2p_geo_levels/g2p_geo_level_values). Without this they're empty
+  # and the Location section's Region/Zone/Woreda/Kebele dropdowns have nothing
+  # to show — see docker/local-dev/geo-seed/ for the seed SQL and its own
+  # comments (this dev image's geo tables key level_value_mnemonic as globally
+  # UNIQUE, so ~2,080 of the 21,053 real rows — duplicate-named kebeles/woredas
+  # elsewhere in the country — are skipped on import; the remaining 18,973
+  # uniquely-named region/zone/woreda/kebele values load and resolve normally).
+  # Deliberately NOT routed through db-seed's own LOAD_GEO_DATA (that toggle
+  # runs the platform's generic/fictional sample geo loader, which would
+  # coexist with this real data and pollute the dropdowns).
+  livestock-registry-geo-seed:
+    image: postgres:16
+    container_name: livestock-registry-geo-seed
+    depends_on:
+      master-data:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${MASTER_DATA_DB}
+      PGUSER: ${MASTER_DATA_DB_USER}
+      PGPASSWORD: ${MASTER_DATA_DB_PASSWORD}
+    volumes:
+      - ./docker/local-dev/geo-seed/ethiopia_geo_seed.sql.gz:/opt/ethiopia_geo_seed.sql.gz:ro
+    entrypoint: ["sh", "-c", "gunzip -c /opt/ethiopia_geo_seed.sql.gz | psql -v ON_ERROR_STOP=1"]
+    restart: "no"
 
   id-generator:
     image: ${IDGEN_IMAGE}
@@ -539,6 +573,8 @@ services:
       staff-api:
         condition: service_healthy
       minio-init:
+        condition: service_completed_successfully
+      livestock-registry-geo-seed:
         condition: service_completed_successfully
       # No depends_on for awe — see staff-api's depends_on comment above.
     restart: 'no'

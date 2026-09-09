@@ -4,6 +4,8 @@ from datetime import date
 
 from openg2p_registry_core.services import G2PRegisterDomainService
 
+from .audit_snapshot import AuditSnapshotMixin
+
 from .domain_validation_utils import parse_date, require_field, validation_error
 
 _logger = logging.getLogger("g2p-register-domain-service")
@@ -22,7 +24,7 @@ _FAYDA_FAN_ID_PATTERN = re.compile(r"^FAN-\d{16}$")
 _MOBILE_NUMBER_PATTERN = re.compile(r"^(\+251[79]\d{8}|0[79]\d{8})$")
 
 
-class G2PRegisterDomainServiceFarmer(G2PRegisterDomainService):
+class G2PRegisterDomainServiceFarmer(AuditSnapshotMixin, G2PRegisterDomainService):
 
     async def validate_domain_attributes(self, records: list[dict]):
         for record in records:
